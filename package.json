@@ -1,0 +1,8 @@
+{
+  "name": "gh-skill",
+  "version": "1.0.0",
+  "description": "Manage GitHub repositories, issues, pull requests, and actions from chat",
+  "main": "index.js",
+  "author": "banana-skills",
+  "license": "MIT"
+}
