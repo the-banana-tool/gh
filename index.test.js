@@ -443,10 +443,27 @@ describe('GitHubSkill', () => {
   // --- unknown resource ---
 
   describe('/gh <unknown>', () => {
-    it('returns error for unknown resource', async () => {
+    it('returns null for unknown resource so chain can continue', async () => {
       const result = await skill.resolveCli({ command: 'gh', args: ['deploy'], context: {} });
-      assert.strictEqual(result.ok, false);
-      assert.ok(result.error.includes('Unknown resource'));
+      assert.strictEqual(result, null);
+    });
+  });
+
+  // --- help in resolveCli ---
+
+  describe('/gh help via resolveCli', () => {
+    it('returns help when first arg is "help"', async () => {
+      const result = await skill.resolveCli({ command: 'gh', args: ['help'], context: {} });
+      assert.strictEqual(result.ok, true);
+      assert.ok(result.message.includes('GitHub Skill'));
+    });
+
+    it('handles leading slash in resource (e.g. "/gh" passed as arg)', async () => {
+      stubGh(skill, [['pr list', '#1 PR']]);
+
+      const result = await skill.resolveCli({ command: 'gh', args: ['/gh', 'pr', 'list'], context: {} });
+      // '/gh' normalizes to 'gh' which is not a resource, returns null
+      assert.strictEqual(result, null);
     });
   });
 
@@ -462,12 +479,32 @@ describe('GitHubSkill', () => {
   // --- handleCommand delegates to resolveCli ---
 
   describe('handleCommand', () => {
-    it('delegates to resolveCli', async () => {
+    it('delegates to resolveCli for structured args', async () => {
       stubGh(skill, [['pr list', '#1 PR']]);
 
       const result = await skill.handleCommand('gh', ['pr', 'list'], {});
       assert.strictEqual(result.ok, true);
       assert.ok(result.message.includes('#1 PR'));
+    });
+
+    it('splits a single sentence arg into tokens', async () => {
+      stubGh(skill, [['pr list', '#1 PR']]);
+
+      const result = await skill.handleCommand('gh', ['pr list'], {});
+      assert.strictEqual(result.ok, true);
+      assert.ok(result.message.includes('#1 PR'));
+    });
+
+    it('returns help for unrecognized natural language input', async () => {
+      const result = await skill.handleCommand('gh', ['check all repos for remotes'], {});
+      assert.strictEqual(result.ok, true);
+      assert.ok(result.message.includes('GitHub Skill'));
+    });
+
+    it('returns help for "help" as single arg', async () => {
+      const result = await skill.handleCommand('gh', ['help'], {});
+      assert.strictEqual(result.ok, true);
+      assert.ok(result.message.includes('GitHub Skill'));
     });
   });
 

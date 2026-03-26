@@ -75,8 +75,12 @@ class GitHubSkill extends Skill {
 
     const [resource, action, ...rest] = args;
 
+    // Normalize: strip leading slash if present (e.g. "/gh" passed as first arg)
+    const normalized = resource.replace(/^\//, '').toLowerCase();
+
     try {
-      switch (resource) {
+      switch (normalized) {
+        case 'help':     return this._help();
         case 'status':   return await this._status();
         case 'pr':       return await this._pr(action, rest);
         case 'issue':    return await this._issue(action, rest);
@@ -84,7 +88,8 @@ class GitHubSkill extends Skill {
         case 'repo':     return await this._repo(action, rest);
         case 'search':   return await this._search([action, ...rest].filter(Boolean));
         default:
-          return fail(`Unknown resource: ${resource}. Run \`/gh help\` for usage.`);
+          // Return null so the resolution chain can try other resolvers (e.g. prompt)
+          return null;
       }
     } catch (err) {
       return fail(err.message);
@@ -92,7 +97,16 @@ class GitHubSkill extends Skill {
   }
 
   async handleCommand(command, args, context) {
-    return this.resolveCli({ command, args, context });
+    // handleCommand is called by the skill tool and resolution chain's 'skill' resolver.
+    // The LLM tool may pass a full sentence as a single arg — try to split it into tokens.
+    let parsedArgs = Array.isArray(args) ? args : [];
+    if (parsedArgs.length === 1 && parsedArgs[0].includes(' ')) {
+      parsedArgs = parsedArgs[0].trim().split(/\s+/);
+    }
+
+    const result = await this.resolveCli({ command, args: parsedArgs, context });
+    // If resolveCli returned null (unrecognized input), show help
+    return result || this._help();
   }
 
   // --- status ---
