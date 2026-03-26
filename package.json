@@ -1,6 +1,6 @@
 {
   "name": "gh-skill",
-  "version": "1.0.0",
+  "version": "26.3.25",
   "description": "Manage GitHub repositories, issues, pull requests, and actions from chat",
   "main": "index.js",
   "author": "banana-skills",

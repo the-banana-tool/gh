@@ -14,7 +14,7 @@ class GitHubSkill extends Skill {
     return {
       id: 'gh',
       name: 'GitHub',
-      version: '1.0.0',
+      version: '26.3.25',
       description: 'Manage GitHub repositories, issues, pull requests, and actions from chat',
       author: 'banana-skills',
       commands: ['gh'],
@@ -81,7 +81,7 @@ class GitHubSkill extends Skill {
         case 'pr':       return await this._pr(action, rest);
         case 'issue':    return await this._issue(action, rest);
         case 'run':      return await this._run(action, rest);
-        case 'repo':     return await this._repo(action);
+        case 'repo':     return await this._repo(action, rest);
         case 'search':   return await this._search([action, ...rest].filter(Boolean));
         default:
           return fail(`Unknown resource: ${resource}. Run \`/gh help\` for usage.`);
@@ -204,12 +204,83 @@ class GitHubSkill extends Skill {
 
   // --- repo ---
 
-  async _repo(action) {
-    if (action && action !== 'view') {
-      return fail(`Unknown repo action: ${action}. Available: view`);
+  async _repo(action, rest = []) {
+    switch (action) {
+      case undefined:
+      case 'view': {
+        const name = rest[0];
+        const args = ['repo', 'view'];
+        if (name) args.push(name);
+        const out = await this._gh(args);
+        return ok(`\`\`\`\n${out}\n\`\`\``);
+      }
+      case 'create': {
+        const name = rest[0];
+        if (!name) return fail('Usage: `/gh repo create <name> [--public|--private] [--description "<desc>"]`');
+        const flags = rest.slice(1);
+        // Default to private if no visibility flag given
+        if (!flags.some(f => f === '--public' || f === '--private' || f === '--internal')) {
+          flags.push('--private');
+        }
+        const out = await this._gh(['repo', 'create', name, ...flags]);
+        return ok(out);
+      }
+      case 'link': {
+        // Link current local repo to a GitHub remote
+        // Usage: /gh repo link [owner/repo] [--remote <name>]
+        let remoteName = 'origin';
+        const remoteIdx = rest.indexOf('--remote');
+        if (remoteIdx !== -1 && rest[remoteIdx + 1]) {
+          remoteName = rest[remoteIdx + 1];
+        }
+        const target = rest.find(r => r !== '--remote' && r !== remoteName);
+        if (!target) return fail('Usage: `/gh repo link <owner/repo> [--remote <name>]`');
+
+        // Check if remote already exists
+        let existingUrl = '';
+        try {
+          existingUrl = await new Promise((resolve, reject) => {
+            execFile('git', ['remote', 'get-url', remoteName], { cwd: this.cwd, timeout: 5000 }, (err, stdout) => {
+              if (err) return reject(err);
+              resolve(stdout.trim());
+            });
+          });
+        } catch (_) { /* remote doesn't exist yet */ }
+
+        if (existingUrl) {
+          return fail(`Remote "${remoteName}" already exists → ${existingUrl}. Use \`/gh repo link ${target} --remote <other-name>\` or remove the existing remote first.`);
+        }
+
+        const url = `https://github.com/${target}.git`;
+        await new Promise((resolve, reject) => {
+          execFile('git', ['remote', 'add', remoteName, url], { cwd: this.cwd, timeout: 5000 }, (err, stdout) => {
+            if (err) return reject(new Error(err.message));
+            resolve(stdout);
+          });
+        });
+        return ok(`Linked remote **${remoteName}** → \`${url}\``);
+      }
+      case 'init': {
+        // Create a GitHub repo AND link it to the current local repo in one step
+        // Usage: /gh repo init <name> [--public|--private]
+        const name = rest[0];
+        if (!name) return fail('Usage: `/gh repo init <name> [--public|--private]`');
+        const flags = rest.slice(1);
+        if (!flags.some(f => f === '--public' || f === '--private' || f === '--internal')) {
+          flags.push('--private');
+        }
+        // Create the repo on GitHub (--source=. links the local dir)
+        const out = await this._gh(['repo', 'create', name, '--source=.', ...flags]);
+        return ok(out);
+      }
+      case 'list': {
+        const flags = rest.length ? rest : ['--limit', '20'];
+        const out = await this._gh(['repo', 'list', ...flags]);
+        return ok(out ? `\`\`\`\n${out}\n\`\`\`` : 'No repositories found.');
+      }
+      default:
+        return fail(`Unknown repo action: ${action}. Available: view, create, link, init, list`);
     }
-    const out = await this._gh(['repo', 'view']);
-    return ok(`\`\`\`\n${out}\n\`\`\``);
   }
 
   // --- search ---
@@ -245,7 +316,11 @@ class GitHubSkill extends Skill {
 | \`/gh run list\` | List recent workflow runs |
 | \`/gh run view <id>\` | View workflow run details and logs |
 | \`/gh run watch <id>\` | Stream workflow run logs until completion |
-| \`/gh repo view\` | Show current repo info |
+| \`/gh repo view [name]\` | Show current or named repo info |
+| \`/gh repo create <name>\` | Create a new GitHub repo (default: private) |
+| \`/gh repo link <owner/repo>\` | Add a GitHub remote to the current local repo |
+| \`/gh repo init <name>\` | Create a GitHub repo and link it to the current directory |
+| \`/gh repo list\` | List your GitHub repositories |
 | \`/gh search <query>\` | Search issues/PRs across repos |`);
   }
 
