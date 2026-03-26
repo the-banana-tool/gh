@@ -312,11 +312,27 @@ describe('GitHubSkill', () => {
     });
   });
 
+  // --- issue close ---
+
+  describe('/gh issue close', () => {
+    it('closes an issue', async () => {
+      stubGh(skill, [['issue close', '']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['issue', 'close', '5'], context: {} });
+      assert.strictEqual(result.ok, true);
+      assert.ok(result.message.includes('#5 closed'));
+    });
+
+    it('fails without number', async () => {
+      const result = await skill.resolveCli({ command: 'gh', args: ['issue', 'close'], context: {} });
+      assert.strictEqual(result.ok, false);
+    });
+  });
+
   // --- unknown issue action ---
 
   describe('/gh issue <unknown>', () => {
     it('returns error for unknown issue action', async () => {
-      const result = await skill.resolveCli({ command: 'gh', args: ['issue', 'close'], context: {} });
+      const result = await skill.resolveCli({ command: 'gh', args: ['issue', 'bogus'], context: {} });
       assert.strictEqual(result.ok, false);
       assert.ok(result.error.includes('Unknown issue action'));
     });
@@ -376,11 +392,26 @@ describe('GitHubSkill', () => {
     });
   });
 
+  // --- run cancel ---
+
+  describe('/gh run cancel', () => {
+    it('cancels a run', async () => {
+      stubGh(skill, [['run cancel', '']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['run', 'cancel', '789'], context: {} });
+      assert.strictEqual(result.ok, true);
+    });
+
+    it('fails without id', async () => {
+      const result = await skill.resolveCli({ command: 'gh', args: ['run', 'cancel'], context: {} });
+      assert.strictEqual(result.ok, false);
+    });
+  });
+
   // --- unknown run action ---
 
   describe('/gh run <unknown>', () => {
     it('returns error for unknown run action', async () => {
-      const result = await skill.resolveCli({ command: 'gh', args: ['run', 'cancel'], context: {} });
+      const result = await skill.resolveCli({ command: 'gh', args: ['run', 'bogus'], context: {} });
       assert.strictEqual(result.ok, false);
       assert.ok(result.error.includes('Unknown run action'));
     });
@@ -405,7 +436,7 @@ describe('GitHubSkill', () => {
     });
 
     it('fails for unknown repo action', async () => {
-      const result = await skill.resolveCli({ command: 'gh', args: ['repo', 'delete'], context: {} });
+      const result = await skill.resolveCli({ command: 'gh', args: ['repo', 'bogus'], context: {} });
       assert.strictEqual(result.ok, false);
       assert.ok(result.error.includes('Unknown repo action'));
     });
@@ -440,12 +471,14 @@ describe('GitHubSkill', () => {
     });
   });
 
-  // --- unknown resource ---
+  // --- unknown resource (passthrough) ---
 
   describe('/gh <unknown>', () => {
-    it('returns null for unknown resource so chain can continue', async () => {
-      const result = await skill.resolveCli({ command: 'gh', args: ['deploy'], context: {} });
-      assert.strictEqual(result, null);
+    it('passes unknown resource directly to gh CLI', async () => {
+      const calls = stubGh(skill, [['extension list', 'gh-copilot']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['extension', 'list'], context: {} });
+      assert.strictEqual(result.ok, true);
+      assert.deepStrictEqual(calls[0], ['extension', 'list']);
     });
   });
 
@@ -458,12 +491,10 @@ describe('GitHubSkill', () => {
       assert.ok(result.message.includes('GitHub Skill'));
     });
 
-    it('handles leading slash in resource (e.g. "/gh" passed as arg)', async () => {
-      stubGh(skill, [['pr list', '#1 PR']]);
-
-      const result = await skill.resolveCli({ command: 'gh', args: ['/gh', 'pr', 'list'], context: {} });
-      // '/gh' normalizes to 'gh' which is not a resource, returns null
-      assert.strictEqual(result, null);
+    it('handles leading slash in resource (e.g. "/help")', async () => {
+      const result = await skill.resolveCli({ command: 'gh', args: ['/help'], context: {} });
+      assert.strictEqual(result.ok, true);
+      assert.ok(result.message.includes('GitHub Skill'));
     });
   });
 
@@ -495,10 +526,11 @@ describe('GitHubSkill', () => {
       assert.ok(result.message.includes('#1 PR'));
     });
 
-    it('returns help for unrecognized natural language input', async () => {
+    it('passes unrecognized input through to gh CLI', async () => {
+      stubGh(skill, [[() => true, new Error('unknown command "check"')]]);
       const result = await skill.handleCommand('gh', ['check all repos for remotes'], {});
-      assert.strictEqual(result.ok, true);
-      assert.ok(result.message.includes('GitHub Skill'));
+      assert.strictEqual(result.ok, false);
+      assert.ok(result.error.includes('unknown command'));
     });
 
     it('returns help for "help" as single arg', async () => {
@@ -538,6 +570,307 @@ describe('GitHubSkill', () => {
   describe('cleanup', () => {
     it('resolves without error', async () => {
       await skill.cleanup();
+    });
+  });
+
+  // --- releases ---
+
+  describe('/gh release', () => {
+    it('lists releases', async () => {
+      stubGh(skill, [['release list', 'v1.0.0  Latest  2024-01-01']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['release', 'list'], context: {} });
+      assert.strictEqual(result.ok, true);
+      assert.ok(result.message.includes('v1.0.0'));
+    });
+
+    it('creates a release', async () => {
+      const calls = stubGh(skill, [['release create', 'https://github.com/o/r/releases/tag/v2.0']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['release', 'create', 'v2.0', '--notes', 'New'], context: {} });
+      assert.strictEqual(result.ok, true);
+      assert.ok(calls[0].includes('--notes'));
+    });
+
+    it('fails create without tag', async () => {
+      const result = await skill.resolveCli({ command: 'gh', args: ['release', 'create'], context: {} });
+      assert.strictEqual(result.ok, false);
+    });
+  });
+
+  // --- gists ---
+
+  describe('/gh gist', () => {
+    it('lists gists', async () => {
+      stubGh(skill, [['gist list', 'abc123  my-gist.js  1 file  public']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['gist', 'list'], context: {} });
+      assert.strictEqual(result.ok, true);
+      assert.ok(result.message.includes('my-gist'));
+    });
+
+    it('fails view without id', async () => {
+      const result = await skill.resolveCli({ command: 'gh', args: ['gist', 'view'], context: {} });
+      assert.strictEqual(result.ok, false);
+    });
+  });
+
+  // --- labels ---
+
+  describe('/gh label', () => {
+    it('lists labels', async () => {
+      stubGh(skill, [['label list', 'bug  #d73a4a  Something broken']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['label', 'list'], context: {} });
+      assert.strictEqual(result.ok, true);
+      assert.ok(result.message.includes('bug'));
+    });
+
+    it('creates a label', async () => {
+      stubGh(skill, [['label create', '']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['label', 'create', 'feature', '--color', '0075ca'], context: {} });
+      assert.strictEqual(result.ok, true);
+    });
+  });
+
+  // --- secrets ---
+
+  describe('/gh secret', () => {
+    it('lists secrets', async () => {
+      stubGh(skill, [['secret list', 'MY_SECRET  Updated 2024-01-01']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['secret', 'list'], context: {} });
+      assert.strictEqual(result.ok, true);
+      assert.ok(result.message.includes('MY_SECRET'));
+    });
+
+    it('fails set without name', async () => {
+      const result = await skill.resolveCli({ command: 'gh', args: ['secret', 'set'], context: {} });
+      assert.strictEqual(result.ok, false);
+    });
+  });
+
+  // --- variables ---
+
+  describe('/gh variable', () => {
+    it('lists variables', async () => {
+      stubGh(skill, [['variable list', 'MY_VAR  my-value  Updated 2024-01-01']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['variable', 'list'], context: {} });
+      assert.strictEqual(result.ok, true);
+      assert.ok(result.message.includes('MY_VAR'));
+    });
+
+    it('gets a variable', async () => {
+      stubGh(skill, [['variable get', 'production']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['variable', 'get', 'ENV'], context: {} });
+      assert.strictEqual(result.ok, true);
+    });
+  });
+
+  // --- workflow ---
+
+  describe('/gh workflow', () => {
+    it('lists workflows', async () => {
+      stubGh(skill, [['workflow list', 'CI  active  123']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['workflow', 'list'], context: {} });
+      assert.strictEqual(result.ok, true);
+      assert.ok(result.message.includes('CI'));
+    });
+
+    it('triggers a workflow', async () => {
+      stubGh(skill, [['workflow run', '']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['workflow', 'run', 'ci.yml'], context: {} });
+      assert.strictEqual(result.ok, true);
+    });
+  });
+
+  // --- cache ---
+
+  describe('/gh cache', () => {
+    it('lists caches', async () => {
+      stubGh(skill, [['cache list', 'node-modules  123MB  2024-01-01']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['cache', 'list'], context: {} });
+      assert.strictEqual(result.ok, true);
+    });
+  });
+
+  // --- auth ---
+
+  describe('/gh auth', () => {
+    it('shows auth status', async () => {
+      stubGh(skill, [['auth status', 'Logged in to github.com as user1']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['auth', 'status'], context: {} });
+      assert.strictEqual(result.ok, true);
+    });
+
+    it('returns token', async () => {
+      stubGh(skill, [['auth token', 'ghp_xxxx']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['auth', 'token'], context: {} });
+      assert.strictEqual(result.ok, true);
+      assert.ok(result.message.includes('ghp_xxxx'));
+    });
+  });
+
+  // --- api ---
+
+  describe('/gh api', () => {
+    it('calls the API and formats JSON', async () => {
+      stubGh(skill, [['api', '{"login":"user1"}']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['api', '/user'], context: {} });
+      assert.strictEqual(result.ok, true);
+      assert.ok(result.message.includes('json'));
+      assert.ok(result.message.includes('user1'));
+    });
+
+    it('fails without endpoint', async () => {
+      const result = await skill.resolveCli({ command: 'gh', args: ['api'], context: {} });
+      assert.strictEqual(result.ok, false);
+    });
+  });
+
+  // --- org ---
+
+  describe('/gh org', () => {
+    it('lists orgs', async () => {
+      stubGh(skill, [['org list', 'my-org\nother-org']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['org', 'list'], context: {} });
+      assert.strictEqual(result.ok, true);
+      assert.ok(result.message.includes('my-org'));
+    });
+  });
+
+  // --- project ---
+
+  describe('/gh project', () => {
+    it('lists projects', async () => {
+      stubGh(skill, [['project list', '#1  My Board  open']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['project', 'list'], context: {} });
+      assert.strictEqual(result.ok, true);
+    });
+
+    it('fails for invalid action', async () => {
+      const result = await skill.resolveCli({ command: 'gh', args: ['project', 'bogus'], context: {} });
+      assert.strictEqual(result.ok, false);
+    });
+  });
+
+  // --- ruleset ---
+
+  describe('/gh ruleset', () => {
+    it('lists rulesets', async () => {
+      stubGh(skill, [['ruleset list', 'main-protection  active']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['ruleset', 'list'], context: {} });
+      assert.strictEqual(result.ok, true);
+    });
+  });
+
+  // --- ssh-key ---
+
+  describe('/gh ssh-key', () => {
+    it('lists SSH keys', async () => {
+      stubGh(skill, [['ssh-key list', 'ssh-ed25519 AAAA...  my-key']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['ssh-key', 'list'], context: {} });
+      assert.strictEqual(result.ok, true);
+    });
+  });
+
+  // --- gpg-key ---
+
+  describe('/gh gpg-key', () => {
+    it('lists GPG keys', async () => {
+      stubGh(skill, [['gpg-key list', 'ABCD1234  my-gpg-key']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['gpg-key', 'list'], context: {} });
+      assert.strictEqual(result.ok, true);
+    });
+  });
+
+  // --- codespace ---
+
+  describe('/gh codespace', () => {
+    it('lists codespaces', async () => {
+      stubGh(skill, [['codespace list', 'my-cs  AVAILABLE  main']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['codespace', 'list'], context: {} });
+      assert.strictEqual(result.ok, true);
+    });
+
+    it('fails for invalid action', async () => {
+      const result = await skill.resolveCli({ command: 'gh', args: ['codespace', 'bogus'], context: {} });
+      assert.strictEqual(result.ok, false);
+    });
+  });
+
+  // --- browse ---
+
+  describe('/gh browse', () => {
+    it('returns repo URL', async () => {
+      stubGh(skill, [['browse', 'https://github.com/octocat/hello-world']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['browse'], context: {} });
+      assert.strictEqual(result.ok, true);
+      assert.ok(result.message.includes('github.com'));
+    });
+  });
+
+  // --- search with type ---
+
+  describe('/gh search with type', () => {
+    it('searches repos by type', async () => {
+      stubGh(skill, [['search repos', 'octocat/hello-world  A test repo']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['search', 'repos', 'hello'], context: {} });
+      assert.strictEqual(result.ok, true);
+      assert.ok(result.message.includes('octocat'));
+    });
+  });
+
+  // --- repo clone/fork/archive ---
+
+  describe('/gh repo extended actions', () => {
+    it('clones a repo', async () => {
+      stubGh(skill, [['repo clone', '']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['repo', 'clone', 'octocat/hello'], context: {} });
+      assert.strictEqual(result.ok, true);
+    });
+
+    it('archives a repo', async () => {
+      stubGh(skill, [['repo archive', '']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['repo', 'archive'], context: {} });
+      assert.strictEqual(result.ok, true);
+    });
+
+    it('deletes a repo', async () => {
+      stubGh(skill, [['repo delete', '']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['repo', 'delete', 'octocat/hello'], context: {} });
+      assert.strictEqual(result.ok, true);
+    });
+  });
+
+  // --- pr extended actions ---
+
+  describe('/gh pr extended actions', () => {
+    it('closes a PR', async () => {
+      stubGh(skill, [['pr close', '']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['pr', 'close', '10'], context: {} });
+      assert.strictEqual(result.ok, true);
+    });
+
+    it('checks out a PR', async () => {
+      stubGh(skill, [['pr checkout', '']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['pr', 'checkout', '10'], context: {} });
+      assert.strictEqual(result.ok, true);
+    });
+
+    it('shows PR diff', async () => {
+      stubGh(skill, [['pr diff', '+ line\n- line']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['pr', 'diff', '10'], context: {} });
+      assert.strictEqual(result.ok, true);
+      assert.ok(result.message.includes('diff'));
+    });
+
+    it('adds a PR comment', async () => {
+      const calls = stubGh(skill, [['pr comment', '']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['pr', 'comment', '10', 'LGTM!'], context: {} });
+      assert.strictEqual(result.ok, true);
+      assert.ok(calls[0].includes('--body'));
+    });
+
+    it('views PR checks', async () => {
+      stubGh(skill, [['pr checks', 'CI  pass  2m']]);
+      const result = await skill.resolveCli({ command: 'gh', args: ['pr', 'checks', '10'], context: {} });
+      assert.strictEqual(result.ok, true);
     });
   });
 
